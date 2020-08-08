@@ -1,5 +1,14 @@
 /*
 This example uses FreeRTOS softwaretimers as there is no built-in Ticker library
+
+Include following in secrets.h file:
+#define WIFI_SSID 
+#define WIFI_PASSWORD 
+
+#define MQTT_PORT 
+#define MQTT_USER 
+#define MQTT_PASSWORD 
+#define MQTT_HOST 
 */
 
 #include <WiFi.h>
@@ -91,20 +100,6 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
         xTimerStart(mqttReconnectTimer, 0);
     }
 }
-
-// void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
-//   Serial.println("Subscribe acknowledged.");
-//   Serial.print("  packetId: ");
-//   Serial.println(packetId);
-//   Serial.print("  qos: ");
-//   Serial.println(qos);
-// }
-
-// void onMqttUnsubscribe(uint16_t packetId) {
-//   Serial.println("Unsubscribe acknowledged.");
-//   Serial.print("  packetId: ");
-//   Serial.println(packetId);
-//}
 
 void pumpcontrol(char speed) {  //Pump speed setting.
     switch (speed) {
@@ -199,12 +194,6 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     }
 }
 
-// void onMqttPublish(uint16_t packetId) {
-//   Serial.println("Publish acknowledged.");
-//   Serial.print("  packetId: ");
-//   Serial.println(packetId);
-// }
-
 void UpdateStatus(void *pvParameters) {
     for (;;) {
         Serial.println("      Status");
@@ -247,11 +236,12 @@ void setup() {
 
     mqttClient.onConnect(onMqttConnect);
     mqttClient.onDisconnect(onMqttDisconnect);
-    //mqttClient.onSubscribe(onMqttSubscribe);
-    //mqttClient.onUnsubscribe(onMqttUnsubscribe);
     mqttClient.onMessage(onMqttMessage);
-    //mqttClient.onPublish(onMqttPublish);
+
+    #ifdef MQTT_USER //if MQTT username is set then include credentials
     mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);
+    #endif
+
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
     xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, NULL);
