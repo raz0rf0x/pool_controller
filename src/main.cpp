@@ -12,16 +12,15 @@ extern "C" {
 #define WIFI_SSID "***REMOVED***"
 #define WIFI_PASSWORD "***REMOVED***"
 
-#define MQTT_HOST IPAddress(192, 168, 0, 232)
 #define MQTT_PORT 1883
-#define MQTT_USER ***REMOVED***
-#define MQTT_PASSWORD ***REMOVED***
+#define MQTT_USER "***REMOVED***"
+#define MQTT_PASSWORD "***REMOVED***"
+#define MQTT_HOST "***REMOVED***"
 
 #define PUMP_RELAY_1 26 //Pump Relays
 #define PUMP_RELAY_2 27
 
 #define HEATER_RELAY 25 //Heater Relay
-
 
 const char pumpsetting[] = "test/control/pump";
 const char pumpsettingstatus[] = "test/status/pump";
@@ -215,9 +214,8 @@ void setup() {
   //mqttClient.onUnsubscribe(onMqttUnsubscribe);
   mqttClient.onMessage(onMqttMessage);
   //mqttClient.onPublish(onMqttPublish);
-  //mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  mqttClient.setCredentials("***REMOVED***","***REMOVED***");
-  mqttClient.setServer("***REMOVED***", MQTT_PORT);
+  mqttClient.setCredentials(MQTT_USER,MQTT_PASSWORD);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
   xTaskCreate(UpdateStatus,"UpdaterTask",2000,NULL,1,NULL);
     
