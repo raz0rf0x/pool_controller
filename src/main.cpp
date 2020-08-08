@@ -14,11 +14,30 @@ extern "C" {
 
 #define MQTT_HOST IPAddress(192, 168, 0, 232)
 #define MQTT_PORT 1883
+#define MQTT_USER ***REMOVED***
+#define MQTT_PASSWORD ***REMOVED***
 
-char pumpsetting[] = "test/control/pump";
-char pumpsettingstatus[] = "test/status/pump";
+#define PUMP_RELAY_1 26 //Pump Relays
+#define PUMP_RELAY_2 27
+
+#define HEATER_RELAY 25 //Heater Relay
+
+
+const char pumpsetting[] = "test/control/pump";
+const char pumpsettingstatus[] = "test/status/pump";
+
+const char setpoint[] = "test/control/setpoint";
+const char heater[] = "test/control/heater";
+const char heaterstatus[] = "test/stat/heating";
+const char setpointstatus[] = "test/stat/setpoint";
+const char heaterstat[] = "test/stat/heater";
+
+const char temptopic[] = "test/stat/temp";
 
 char pumpspeed = '0';
+char heat_on = '0';
+int heatsetpoint = 0;
+
 
 AsyncMqttClient mqttClient;
 TimerHandle_t mqttReconnectTimer;
@@ -55,20 +74,18 @@ void onMqttConnect(bool sessionPresent) {
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
   Serial.println(sessionPresent);
-  uint16_t packetIdSub = mqttClient.subscribe("test/lol", 2);
-  Serial.print("Subscribing at QoS 2, packetId: ");
-  Serial.println(packetIdSub);
-  mqttClient.publish("test/lol", 0, true, "test 1");
-  Serial.println("Publishing at QoS 0");
-  uint16_t packetIdPub1 = mqttClient.publish("test/lol", 1, true, "test 2");
-  Serial.print("Publishing at QoS 1, packetId: ");
-  Serial.println(packetIdPub1);
-  uint16_t packetIdPub2 = mqttClient.publish("test/lol", 2, true, "test 3");
-  Serial.print("Publishing at QoS 2, packetId: ");
-  Serial.println(packetIdPub2);
+
   uint16_t pumpsettingPub = mqttClient.subscribe(pumpsetting, 0);
   Serial.print("Subscribed to pump topic: ");
   Serial.println(pumpsettingPub);
+  
+  uint16_t heateronPub = mqttClient.subscribe(heater, 0);
+  Serial.print("Subscribed to heat control topic: ");
+  Serial.println(heateronPub);
+
+  uint16_t heatersetpointPub = mqttClient.subscribe(setpoint, 0);
+  Serial.print("Subscribed to heat setpoint topic: ");
+  Serial.println(heatersetpointPub);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -97,9 +114,8 @@ void pumpcontrol(char speed){
   switch (speed){
     case '0':
       Serial.println("Pump off");
-      //digitalWrite(25, HIGH);
-      digitalWrite(26, HIGH);
-      digitalWrite(27, HIGH);
+      digitalWrite(PUMP_RELAY_1, HIGH);
+      digitalWrite(PUMP_RELAY_2, HIGH);
       pumpspeed = '0';
       if(mqttClient.publish(pumpsettingstatus, 2, false, "0") == 0){
         Serial.println("Mqtt Failed");
@@ -107,9 +123,8 @@ void pumpcontrol(char speed){
       break;
     case '1':
       Serial.println("Pump 1");
-      //digitalWrite(25, HIGH);
-      digitalWrite(26, HIGH);
-      digitalWrite(27, LOW);
+      digitalWrite(PUMP_RELAY_1, HIGH);
+      digitalWrite(PUMP_RELAY_2, LOW);
       pumpspeed = '1';
       if(mqttClient.publish(pumpsettingstatus, 2, false, "1") == 0){
         Serial.println("Mqtt Failed");
@@ -117,9 +132,8 @@ void pumpcontrol(char speed){
       break;
     case '2':
       Serial.println("Pump 2");
-      //digitalWrite(25, HIGH);
-      digitalWrite(26, LOW);
-      digitalWrite(27, HIGH);
+      digitalWrite(PUMP_RELAY_1, LOW);
+      digitalWrite(PUMP_RELAY_2, HIGH);
       pumpspeed = '2';
       if(mqttClient.publish(pumpsettingstatus, 2, false, "2") == 0){
         Serial.println("Mqtt Failed");
@@ -127,9 +141,8 @@ void pumpcontrol(char speed){
       break;
     case '3':
       Serial.println("Pump 3");
-      //digitalWrite(25, HIGH);
-      digitalWrite(26, LOW);
-      digitalWrite(27, LOW);
+      digitalWrite(PUMP_RELAY_1, LOW);
+      digitalWrite(PUMP_RELAY_2, LOW);
       pumpspeed = '3';
       if(mqttClient.publish(pumpsettingstatus, 2, false, "3") == 0){
         Serial.println("Mqtt Failed");
@@ -165,17 +178,31 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 //   Serial.println(packetId);
 // }
 
+void UpdateStatus(  void *pvParameters  ) {
+  for (;;){
+    Serial.println("      Status");
+    Serial.println("-------------------");
+    Serial.print("Pump setting: ");
+    Serial.println(pumpspeed);
+    if(mqttClient.publish(pumpsettingstatus, 2, false, String(pumpspeed).c_str()) == 0){
+      Serial.println("Mqtt Failed");
+    }
+
+    vTaskDelay( 10000 / portTICK_PERIOD_MS );
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
 
-  pinMode(25, OUTPUT);
-  digitalWrite(25, HIGH);
-  pinMode(26, OUTPUT);
-  digitalWrite(26, HIGH);
-  pinMode(27, OUTPUT);
-  digitalWrite(27, HIGH);
+  pinMode(HEATER_RELAY, OUTPUT);
+  digitalWrite(HEATER_RELAY, HIGH);
+  pinMode(PUMP_RELAY_1, OUTPUT);
+  digitalWrite(PUMP_RELAY_1, HIGH);
+  pinMode(PUMP_RELAY_2, OUTPUT);
+  digitalWrite(PUMP_RELAY_2, HIGH);
 
   mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
   wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
@@ -192,7 +219,11 @@ void setup() {
   mqttClient.setCredentials("***REMOVED***","***REMOVED***");
   mqttClient.setServer("***REMOVED***", MQTT_PORT);
 
+  xTaskCreate(UpdateStatus,"UpdaterTask",2000,NULL,1,NULL);
+    
   connectToWifi();
+
+  vTaskStartScheduler();
 }
 
 void loop() {
