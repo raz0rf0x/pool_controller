@@ -5,10 +5,13 @@ Include following in secrets.h file:
 #define WIFI_SSID 
 #define WIFI_PASSWORD 
 
-#define MQTT_PORT 
+#define MQTT_PORT
+#define MQTT_HOST
+
+Leave the following commented/absent if authentication is ununsed.
 #define MQTT_USER 
 #define MQTT_PASSWORD 
-#define MQTT_HOST 
+
 */
 
 #include <secrets.h> //Credentials storage
@@ -22,47 +25,42 @@ extern "C" {
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-#define PUMP_RELAY_1 26 //Pump Relays
-#define PUMP_RELAY_2 27
-
-#define HEATER_RELAY 25 //Heater Relay
-
-//const int oneWireBus = 4;
-#define TEMP_PROBE_PIN 17
-
 #define MQTT_UPDATE_FREQ 10000 //Updater frequency in ms
-#define TEMP_UPDATE_FREQ 1000  //Temp udpate freqency in ms
-
-//MQTT Topics
 const char eventtopic[] = "test/stat/event";
 
+#define PUMP_RELAY_1 26     //Pump Relays
+#define PUMP_RELAY_2 27
 const char pumpsetting[] = "test/control/pump";
 const char pumpsettingstatus[] = "test/stat/pump";
-
-const char heater_setpoint[] = "test/control/setpoint";
-const char heater_control[] = "test/control/heater";
-const char heater_run_status[] = "test/stat/heating";
-const char setpoint_status[] = "test/stat/setpoint";
-const char heater_stat[] = "test/stat/heater";
-
-const char temptopic[] = "test/stat/temp";
-
 char pumpspeed = '0';       //Init pumpspeed global
 
+#define NUM_TEMP_READ 10
+#define TEMP_UPDATE_FREQ 1000  //Temp update freqency in ms
+#define TEMP_PROBE_PIN 17      //Temp probe pin
+const char temptopic[] = "test/stat/temp";
+float temp = 0.0;
+
+#define HEATER_RELAY 25 //Heater Relay
+#define HEAT_UPDATE_FREQ 5000 //Heater check freqency in ms
 bool heat_power = false;    //Init heatercommand global
 int heatsetpoint = 0;       //Init heatsetpoint global
 bool heating = false;       //Init heater status global
-
-#define NUM_TEMP_READ 10
-float temp = 0.0;
-//float temp_readings[NUM_TEMP_READ];
+const char setpoint_status[] = "test/stat/setpoint";
+const char heater_stat[] = "test/stat/heater";
+const char heater_setpoint[] = "test/control/setpoint";
+const char heater_control[] = "test/control/heater";
+const char heater_run_status[] = "test/stat/heating";
 
 OneWire oneWire(TEMP_PROBE_PIN);
 DallasTemperature sensors(&oneWire);
 
 AsyncMqttClient mqttClient;
+
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
+TaskHandle_t xUpdateStatus;
+TaskHandle_t xGetTempTask;
+TaskHandle_t xrunHeater;
 
 void connectToWifi() {
     Serial.println("Connecting to Wi-Fi...");
@@ -88,35 +86,6 @@ void WiFiEvent(WiFiEvent_t event) {
         xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
         xTimerStart(wifiReconnectTimer, 0);
         break;
-    }
-}
-
-void onMqttConnect(bool sessionPresent) {
-    Serial.println("Connected to MQTT.");
-    Serial.print("Session present: ");
-    Serial.println(sessionPresent);
-
-    uint16_t pumpsettingPub = mqttClient.subscribe(pumpsetting, 0);
-    Serial.print("Subscribed to pump topic: ");
-    Serial.println(pumpsettingPub);
-
-    uint16_t heateronPub = mqttClient.subscribe(heater_control, 0);
-    Serial.print("Subscribed to heat control topic: ");
-    Serial.println(heateronPub);
-
-    uint16_t heatersetpointPub = mqttClient.subscribe(heater_setpoint, 0);
-    Serial.print("Subscribed to heat setpoint topic: ");
-    Serial.println(heatersetpointPub);
-
-    if (mqttClient.publish(eventtopic, 2, false, "Connected to MQTT") == 0) {
-      Serial.println("Mqtt Failed");}   
-}
-
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-    Serial.println("Disconnected from MQTT.");
-
-    if (WiFi.isConnected()) {
-        xTimerStart(mqttReconnectTimer, 0);
     }
 }
 
@@ -204,7 +173,10 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
       }
         else if(strcmp(topic, heater_setpoint) == 0) {  //Heater setpoint topic.
         Serial.print("Got Heater setpoint command: ");
-        Serial.println(payload);
+        Serial.println(atoi(payload));
+        heatsetpoint = int(atoi(payload));
+        if (mqttClient.publish(setpoint_status, 2, false, payload) == 0) {
+          Serial.println("Mqtt Failed");}
       }
       else {                                            //Catchall.
         if (mqttClient.publish(eventtopic, 2, false, "Unhandled command topic: ") == 0) {
@@ -257,6 +229,35 @@ void GetTempTask(void *pvParameters) {
   }
 }
 
+void runHeater(void *pvParameters) {
+  for (;;) {
+    // if ( heat_power){Serial.println("heat turned on");}
+    // if ( heating ){Serial.println("heat currently running");}
+    // Serial.print(heatsetpoint);
+    // Serial.print(" / ");
+    // Serial.println(int(temp-1));
+    if ( heat_power && !heating && (int(heatsetpoint) > (int(temp-1))) ){ // && (pressure > 7) ){
+      digitalWrite(HEATER_RELAY, LOW);
+      heating = true;
+      if (mqttClient.publish(heater_stat, 2, false, "On") == 0) {
+          Serial.println("Mqtt Failed");}
+    }
+    if ((heat_power && heating && (int(heatsetpoint) < (int(temp)))) ){ //|| (pressure < 8) ){
+      digitalWrite(HEATER_RELAY, HIGH);
+      heating = false;
+      if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
+        Serial.println("Mqtt Failed");}
+    }
+    if (!heat_power){
+      digitalWrite(HEATER_RELAY, HIGH);
+      heating = false;
+      if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
+        Serial.println("Mqtt Failed");}
+    }
+  vTaskDelay(HEAT_UPDATE_FREQ / portTICK_PERIOD_MS);
+  }
+}
+
 void UpdateStatus(void *pvParameters) {
   for (;;) {
     Serial.println("      Status");
@@ -277,6 +278,17 @@ void UpdateStatus(void *pvParameters) {
       if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
         Serial.println("Mqtt Failed");}
     }
+
+    Serial.print("Heater run status: ");
+    if (heating) {
+      Serial.println("on.");
+      if (mqttClient.publish(heater_run_status, 2, false, "On") == 0) {
+        Serial.println("Mqtt Failed");}
+    } else {
+      Serial.println("off.");
+      if (mqttClient.publish(heater_run_status, 2, false, "Off") == 0) {
+        Serial.println("Mqtt Failed");}
+    }
     
     Serial.print("Temperature: ");
     char charVal[10];
@@ -284,8 +296,50 @@ void UpdateStatus(void *pvParameters) {
     Serial.println(charVal);
     if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
       Serial.println("Mqtt Failed");}
+
+    if (mqttClient.publish(eventtopic, 2, false, "Alive") == 0) {
+      Serial.println("Mqtt Failed");}
+    
     vTaskDelay(MQTT_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
+}
+
+void onMqttConnect(bool sessionPresent) {
+    Serial.println("Connected to MQTT.");
+    Serial.print("Session present: ");
+    Serial.println(sessionPresent);
+
+    uint16_t pumpsettingPub = mqttClient.subscribe(pumpsetting, 0);
+    Serial.print("Subscribed to pump topic: ");
+    Serial.println(pumpsettingPub);
+
+    uint16_t heateronPub = mqttClient.subscribe(heater_control, 0);
+    Serial.print("Subscribed to heat control topic: ");
+    Serial.println(heateronPub);
+
+    uint16_t heatersetpointPub = mqttClient.subscribe(heater_setpoint, 0);
+    Serial.print("Subscribed to heat setpoint topic: ");
+    Serial.println(heatersetpointPub);
+
+    if (mqttClient.publish(eventtopic, 2, false, "Connected to MQTT") == 0) {
+      Serial.println("Mqtt Failed");}
+
+    xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, &xUpdateStatus);
+    xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, &xGetTempTask);
+    xTaskCreate(runHeater, "HeaterTask", 20000, NULL, 1, &xrunHeater);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+    Serial.println("Disconnected from MQTT.");
+
+    if (WiFi.isConnected()) {
+        xTimerStart(mqttReconnectTimer, 0);
+    }
+
+    vTaskDelete(xUpdateStatus);
+    vTaskDelete(xGetTempTask);
+    vTaskDelete(xrunHeater);
+
 }
 
 void setup() {
@@ -318,9 +372,6 @@ void setup() {
     #endif
 
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-
-    xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, NULL);
-    xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, NULL);
 
     connectToWifi();
 
