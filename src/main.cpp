@@ -11,21 +11,30 @@ Include following in secrets.h file:
 #define MQTT_HOST 
 */
 
-#include <WiFi.h>
-#include <secrets.h>
+#include <secrets.h> //Credentials storage
 
+#include <WiFi.h>
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/timers.h"
 }
 #include <AsyncMqttClient.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 #define PUMP_RELAY_1 26 //Pump Relays
 #define PUMP_RELAY_2 27
 
 #define HEATER_RELAY 25 //Heater Relay
 
+//const int oneWireBus = 4;
+#define TEMP_PROBE_PIN 17
+
 #define MQTT_UPDATE_FREQ 10000 //Updater frequency in ms
+#define TEMP_UPDATE_FREQ 1000  //Temp udpate freqency in ms
+
+//MQTT Topics
+const char eventtopic[] = "test/stat/event";
 
 const char pumpsetting[] = "test/control/pump";
 const char pumpsettingstatus[] = "test/stat/pump";
@@ -38,11 +47,18 @@ const char heater_stat[] = "test/stat/heater";
 
 const char temptopic[] = "test/stat/temp";
 
-char pumpspeed = '0';
-bool heat_power = false;
-int heatsetpoint = 0;
-bool heating = false;
+char pumpspeed = '0';       //Init pumpspeed global
 
+bool heat_power = false;    //Init heatercommand global
+int heatsetpoint = 0;       //Init heatsetpoint global
+bool heating = false;       //Init heater status global
+
+#define NUM_TEMP_READ 10
+float temp = 0.0;
+//float temp_readings[NUM_TEMP_READ];
+
+OneWire oneWire(TEMP_PROBE_PIN);
+DallasTemperature sensors(&oneWire);
 
 AsyncMqttClient mqttClient;
 TimerHandle_t mqttReconnectTimer;
@@ -91,6 +107,9 @@ void onMqttConnect(bool sessionPresent) {
     uint16_t heatersetpointPub = mqttClient.subscribe(heater_setpoint, 0);
     Serial.print("Subscribed to heat setpoint topic: ");
     Serial.println(heatersetpointPub);
+
+    if (mqttClient.publish(eventtopic, 2, false, "Connected to MQTT") == 0) {
+      Serial.println("Mqtt Failed");}   
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -161,6 +180,8 @@ void onHeaterControl(String power) {  //Heater power control.
       }
     } else {
       Serial.println("Unknown heater command payload.");
+        if (mqttClient.publish(eventtopic, 2, false, "Unknown Heater Command payload.") == 0) {
+          Serial.println("Mqtt Failed");}   
     }
 }
 
@@ -186,35 +207,85 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         Serial.println(payload);
       }
       else {                                            //Catchall.
-        Serial.print("Unhandled command: ");
-        Serial.println(topic);
+        if (mqttClient.publish(eventtopic, 2, false, "Unhandled command topic: ") == 0) {
+          Serial.println("Mqtt Failed");}        
       }
     } else {
       Serial.println("Invalid Payload");
     }
 }
 
-void UpdateStatus(void *pvParameters) {
-    for (;;) {
-        Serial.println("      Status");
-        Serial.println("-------------------");
-        Serial.print("Pump setting: ");
-        Serial.println(pumpspeed);
-        if (mqttClient.publish(pumpsettingstatus, 2, false, String(pumpspeed).c_str()) == 0) {
-            Serial.println("Mqtt Failed");
-        }
-        Serial.print("Heater setting: ");
-        if (heat_power) {
-          Serial.println("on.");
-          if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
-            Serial.println("Mqtt Failed");}
-        } else {
-          Serial.println("off.");
-          if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
-            Serial.println("Mqtt Failed");}
-        }
-        vTaskDelay(MQTT_UPDATE_FREQ / portTICK_PERIOD_MS);
+void GetTempTask(void *pvParameters) {
+  int readindex = 0;
+  float temptemp = 0.0;
+  float temp_readings[NUM_TEMP_READ];
+  float temperatureF = 0.0;
+
+  Serial.println("Init Temp");
+  if (mqttClient.publish(eventtopic, 2, false, "Init Temp") == 0) {
+    Serial.println("Mqtt Failed");}
+  do{
+    sensors.requestTemperatures();
+    Serial.println("Init retry");
+    temperatureF = sensors.getTempFByIndex(0);
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+  } while (temperatureF <= 0);
+  
+  for (int i = 0; i <= NUM_TEMP_READ ; i++){
+    temp_readings[i] = temperatureF;
+    temptemp = temptemp + temperatureF;
+  }
+  for (;;) {
+    sensors.requestTemperatures();
+    temperatureF = sensors.getTempFByIndex(0);
+    if (temperatureF > 0) {
+      temptemp = temptemp - temp_readings[readindex];
+      temp_readings[readindex] = temperatureF;
+      temptemp = temptemp + temp_readings[readindex];
+      readindex = readindex + 1;
+
+      if (readindex >= NUM_TEMP_READ) {
+        readindex = 0;
+      }
+      temp = temptemp / (NUM_TEMP_READ + 1);
+    } else {
+      Serial.println("TempFail");
+      if (mqttClient.publish(eventtopic, 2, false, "TempFail") == 0) {
+        Serial.println("Mqtt Failed");}
     }
+    vTaskDelay(TEMP_UPDATE_FREQ / portTICK_PERIOD_MS);
+  }
+}
+
+void UpdateStatus(void *pvParameters) {
+  for (;;) {
+    Serial.println("      Status");
+    Serial.println("-------------------");
+    Serial.print("Pump setting: ");
+    Serial.println(pumpspeed);
+    if (mqttClient.publish(pumpsettingstatus, 2, false, String(pumpspeed).c_str()) == 0) {
+      Serial.println("Mqtt Failed");
+    }
+
+    Serial.print("Heater setting: ");
+    if (heat_power) {
+      Serial.println("on.");
+      if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
+        Serial.println("Mqtt Failed");}
+    } else {
+      Serial.println("off.");
+      if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
+        Serial.println("Mqtt Failed");}
+    }
+    
+    Serial.print("Temperature: ");
+    char charVal[10];
+    dtostrf(temp, 4, 2, charVal);
+    Serial.println(charVal);
+    if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
+      Serial.println("Mqtt Failed");}
+    vTaskDelay(MQTT_UPDATE_FREQ / portTICK_PERIOD_MS);
+  }
 }
 
 void setup() {
@@ -222,9 +293,13 @@ void setup() {
     Serial.println();
     Serial.println();
 
-    pinMode(HEATER_RELAY, OUTPUT);
+    sensors.begin(); //Onewire temp sensor bus
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    //InitTempArray();
+
+    pinMode(HEATER_RELAY, OUTPUT);          //Init GPIO for heater relay
     digitalWrite(HEATER_RELAY, HIGH);
-    pinMode(PUMP_RELAY_1, OUTPUT);
+    pinMode(PUMP_RELAY_1, OUTPUT);          //Init GPIO for pump control relays
     digitalWrite(PUMP_RELAY_1, HIGH);
     pinMode(PUMP_RELAY_2, OUTPUT);
     digitalWrite(PUMP_RELAY_2, HIGH);
@@ -245,6 +320,7 @@ void setup() {
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
     xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, NULL);
+    xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, NULL);
 
     connectToWifi();
 
