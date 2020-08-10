@@ -17,6 +17,9 @@ Leave the following commented/absent if authentication is ununsed.
 #include <secrets.h> //Credentials storage
 
 #include <WiFi.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/timers.h"
@@ -36,12 +39,12 @@ char pumpspeed = '0';       //Init pumpspeed global
 
 #define NUM_TEMP_READ 10
 #define TEMP_UPDATE_FREQ 1000  //Temp update freqency in ms
-#define TEMP_PROBE_PIN 17      //Temp probe pin
+#define TEMP_PROBE_PIN 5      //Temp probe pin
 const char temptopic[] = "test/stat/temp";
 float temp = 0.0;
 
 #define HEATER_RELAY 25 //Heater Relay
-#define HEAT_UPDATE_FREQ 5000 //Heater check freqency in ms
+#define HEAT_UPDATE_FREQ 10000 //Heater check freqency in ms
 bool heat_power = false;    //Init heatercommand global
 int heatsetpoint = 0;       //Init heatsetpoint global
 bool heating = false;       //Init heater status global
@@ -198,7 +201,7 @@ void GetTempTask(void *pvParameters) {
     Serial.println("Mqtt Failed");}
   do{
     sensors.requestTemperatures();
-    Serial.println("Init retry");
+    Serial.println("Temp Init retry");
     temperatureF = sensors.getTempFByIndex(0);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
   } while (temperatureF <= 0);
@@ -210,18 +213,22 @@ void GetTempTask(void *pvParameters) {
   for (;;) {
     sensors.requestTemperatures();
     temperatureF = sensors.getTempFByIndex(0);
+    // Serial.println("Blyat");
     if (temperatureF > 0) {
       temptemp = temptemp - temp_readings[readindex];
       temp_readings[readindex] = temperatureF;
       temptemp = temptemp + temp_readings[readindex];
       readindex = readindex + 1;
+      // Serial.print("Temp: ");
+      // Serial.println(temperatureF);
 
       if (readindex >= NUM_TEMP_READ) {
         readindex = 0;
       }
       temp = temptemp / (NUM_TEMP_READ + 1);
     } else {
-      Serial.println("TempFail");
+      Serial.print("TempFail");
+      Serial.println(temperatureF);
       if (mqttClient.publish(eventtopic, 2, false, "TempFail") == 0) {
         Serial.println("Mqtt Failed");}
     }
