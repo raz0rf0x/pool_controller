@@ -17,9 +17,6 @@ Leave the following commented/absent if authentication is ununsed.
 #include <secrets.h> //Credentials storage
 
 #include <WiFi.h>
-#include <ESPmDNS.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/timers.h"
@@ -38,8 +35,8 @@ const char pumpsettingstatus[] = "test/stat/pump";
 char pumpspeed = '0';       //Init pumpspeed global
 
 #define NUM_TEMP_READ 10
-#define TEMP_UPDATE_FREQ 1000  //Temp update freqency in ms
-#define TEMP_PROBE_PIN 5      //Temp probe pin
+#define TEMP_UPDATE_FREQ 3000  //Temp update freqency in ms
+#define TEMP_PROBE_PIN 32      //Temp probe pin
 const char temptopic[] = "test/stat/temp";
 float temp = 0.0;
 
@@ -54,6 +51,11 @@ const char heater_setpoint[] = "test/control/setpoint";
 const char heater_control[] = "test/control/heater";
 const char heater_run_status[] = "test/stat/heating";
 
+#define PRESSURE_PIN 35 //Pressure sensor pin
+#define PRESSURE_UPDATE_FREQ 1000 //Heater check freqency in ms
+const char pressuretopic[] = "temp/stat/pressure";
+int pressure = 0;
+
 OneWire oneWire(TEMP_PROBE_PIN);
 DallasTemperature sensors(&oneWire);
 
@@ -61,9 +63,11 @@ AsyncMqttClient mqttClient;
 
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
+
 TaskHandle_t xUpdateStatus;
 TaskHandle_t xGetTempTask;
 TaskHandle_t xrunHeater;
+TaskHandle_t xpressureTask;
 
 void connectToWifi() {
     Serial.println("Connecting to Wi-Fi...");
@@ -190,6 +194,30 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
     }
 }
 
+void PressureTask(void *pvParameters) {
+  int readindex = 0;
+  int pressure_sum = 0;
+  int readings[10];
+  int pval = analogRead(PRESSURE_PIN);
+  for (int i = 0; i <= 9; i++) {
+    readings[i] = pval;
+    pressure_sum += pval;
+  }
+  for (;;) {
+    pval = analogRead(PRESSURE_PIN);
+    pressure_sum = pressure_sum - readings[readindex];
+    readings[readindex] = pval;
+    pressure_sum = pressure_sum + readings[readindex];
+    readindex++;
+    if (readindex >= 10) {
+      readindex = 0;
+    }
+    pressure = map((pressure_sum / 10), 31, 479, 0, 30);
+    vTaskDelay(PRESSURE_UPDATE_FREQ / portTICK_PERIOD_MS);
+  }
+
+}
+
 void GetTempTask(void *pvParameters) {
   int readindex = 0;
   float temptemp = 0.0;
@@ -200,9 +228,11 @@ void GetTempTask(void *pvParameters) {
   if (mqttClient.publish(eventtopic, 2, false, "Init Temp") == 0) {
     Serial.println("Mqtt Failed");}
   do{
+    noInterrupts();
     sensors.requestTemperatures();
     Serial.println("Temp Init retry");
     temperatureF = sensors.getTempFByIndex(0);
+    interrupts();
     vTaskDelay(2000 / portTICK_PERIOD_MS);
   } while (temperatureF <= 0);
   
@@ -304,9 +334,15 @@ void UpdateStatus(void *pvParameters) {
     if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
       Serial.println("Mqtt Failed");}
 
-    if (mqttClient.publish(eventtopic, 2, false, "Alive") == 0) {
+    Serial.print("Pressure: ");
+    char pressval[10];
+    dtostrf(pressure, 2, 0, pressval);
+    Serial.println(pressval);
+    if (mqttClient.publish(pressuretopic, 2, false, pressval) == 0) {
       Serial.println("Mqtt Failed");}
     
+    if (mqttClient.publish(eventtopic, 2, false, "Alive") == 0) {
+      Serial.println("Mqtt Failed");}
     vTaskDelay(MQTT_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
 }
@@ -334,6 +370,7 @@ void onMqttConnect(bool sessionPresent) {
     xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, &xUpdateStatus);
     xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, &xGetTempTask);
     xTaskCreate(runHeater, "HeaterTask", 20000, NULL, 1, &xrunHeater);
+    xTaskCreate(PressureTask, "PressureReadTask", 5000, NULL, 1, &xpressureTask);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -345,7 +382,7 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 
     vTaskDelete(xUpdateStatus);
     vTaskDelete(xGetTempTask);
-    vTaskDelete(xrunHeater);
+    vTaskDelete(xrunHeater);    
 
 }
 
@@ -356,14 +393,17 @@ void setup() {
 
     sensors.begin(); //Onewire temp sensor bus
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    //InitTempArray();
 
     pinMode(HEATER_RELAY, OUTPUT);          //Init GPIO for heater relay
     digitalWrite(HEATER_RELAY, HIGH);
+
     pinMode(PUMP_RELAY_1, OUTPUT);          //Init GPIO for pump control relays
     digitalWrite(PUMP_RELAY_1, HIGH);
     pinMode(PUMP_RELAY_2, OUTPUT);
     digitalWrite(PUMP_RELAY_2, HIGH);
+    
+    pinMode(PRESSURE_PIN, INPUT);           //Init GPIO for analog read of pressure sensor
+    analogReadResolution(8);                //Dampen resolution. Mapping from 0-30, I don't need 12 bit resolution on the ADC
 
     mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
     wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
