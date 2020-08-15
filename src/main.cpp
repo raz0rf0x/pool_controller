@@ -1,6 +1,4 @@
 /*
-This example uses FreeRTOS softwaretimers as there is no built-in Ticker library
-
 Include following in secrets.h file:
 #define WIFI_SSID 
 #define WIFI_PASSWORD 
@@ -257,14 +255,11 @@ void GetTempTask(void *pvParameters) {
   for (;;) {
     sensors.requestTemperaturesByIndex(0);
     temperatureF = sensors.getTempFByIndex(0);
-    // SERIAL.println("Blyat");
     if (temperatureF > 0) {
       temptemp = temptemp - temp_readings[readindex];
       temp_readings[readindex] = temperatureF;
       temptemp = temptemp + temp_readings[readindex];
       readindex = readindex + 1;
-      // SERIAL.print("Temp: ");
-      // SERIAL.println(temperatureF);
 
       if (readindex >= NUM_TEMP_READ) {
         readindex = 0;
@@ -283,11 +278,6 @@ void GetTempTask(void *pvParameters) {
 
 void runHeater(void *pvParameters) {
   for (;;) {
-    // if ( heat_power){SERIAL.println("heat turned on");}
-    // if ( heating ){SERIAL.println("heat currently running");}
-    // SERIAL.print(heatsetpoint);
-    // SERIAL.print(" / ");
-    // SERIAL.println(int(temp-1));
     if ( heat_power && !heating && (int(heatsetpoint) > (int(temp-1))) ){ // && (pressure > 7) ){
       digitalWrite(HEATER_RELAY, LOW);
       heating = true;
@@ -356,13 +346,6 @@ void UpdateStatus(void *pvParameters) {
     if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
       SERIAL.println("Mqtt Failed");}
 
-    // SERIAL.print("Heat Setpoint: ");
-    // char heatVal[10];
-    // dtostrf(heatsetpoint, 4, 2, heatVal);
-    // SERIAL.println(heatVal);
-    // if (mqttClient.publish(setpoint_status, 2, false, heatVal) == 0) {
-    //   SERIAL.println("Mqtt Failed");}
-
     SERIAL.print("Pressure: ");
     char pressval[10];
     dtostrf(pressure, 2, 0, pressval);
@@ -418,9 +401,6 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 void setup() {
     SERIAL.begin(74880);
     delay(100);
-    // SERIAL.begin(115200);
-    // SERIAL.println();
-    // SERIAL.println();
 
     sensors.begin(); //Onewire temp sensor bus
     vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -471,22 +451,6 @@ void loop() {
       case '\r':
         SERIAL.println();
         break;
-      // case 'C':
-      //   SERIAL.print("\nConnecting ");
-      //   WiFi.begin(ssid, password);
-      //   waitForConnection();
-      //   break;
-      // case 'D':
-      //   SERIAL.print("\nDisconnecting ...");
-      //   WiFi.disconnect();
-      //   waitForDisconnection();
-      //   break;
-      // case 'R':
-      //   SERIAL.print("\nReconnecting ");
-      //   WiFi.reconnect();
-      //   waitForDisconnection();
-      //   waitForConnection();
-      //   break;
       default:
         SERIAL.print(c);
         break;
