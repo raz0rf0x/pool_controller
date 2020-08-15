@@ -35,7 +35,7 @@ const char pumpsettingstatus[] = "test/stat/pump";
 char pumpspeed = '0';       //Init pumpspeed global
 
 #define NUM_TEMP_READ 10
-#define TEMP_UPDATE_FREQ 3000  //Temp update freqency in ms
+#define TEMP_UPDATE_FREQ 5000  //Temp update freqency in ms
 #define TEMP_PROBE_PIN 32      //Temp probe pin
 const char temptopic[] = "test/stat/temp";
 float temp = 0.0;
@@ -53,7 +53,7 @@ const char heater_run_status[] = "test/stat/heating";
 
 #define PRESSURE_PIN 35 //Pressure sensor pin
 #define PRESSURE_UPDATE_FREQ 1000 //Heater check freqency in ms
-const char pressuretopic[] = "temp/stat/pressure";
+const char pressuretopic[] = "test/stat/pressure";
 int pressure = 0;
 
 OneWire oneWire(TEMP_PROBE_PIN);
@@ -213,9 +213,11 @@ void PressureTask(void *pvParameters) {
       readindex = 0;
     }
     pressure = map((pressure_sum / 10), 31, 479, 0, 30);
+    if (pressure < 0) {
+      pressure = 0;
+    }
     vTaskDelay(PRESSURE_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
-
 }
 
 void GetTempTask(void *pvParameters) {
@@ -241,7 +243,7 @@ void GetTempTask(void *pvParameters) {
     temptemp = temptemp + temperatureF;
   }
   for (;;) {
-    sensors.requestTemperatures();
+    sensors.requestTemperaturesByIndex(0);
     temperatureF = sensors.getTempFByIndex(0);
     // Serial.println("Blyat");
     if (temperatureF > 0) {
@@ -259,6 +261,7 @@ void GetTempTask(void *pvParameters) {
     } else {
       Serial.print("TempFail");
       Serial.println(temperatureF);
+      sensors.requestTemperaturesByIndex(0);
       if (mqttClient.publish(eventtopic, 2, false, "TempFail") == 0) {
         Serial.println("Mqtt Failed");}
     }
