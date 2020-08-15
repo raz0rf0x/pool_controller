@@ -15,7 +15,6 @@ Leave the following commented/absent if authentication is ununsed.
 */
 
 #include <secrets.h> //Credentials storage
-
 #include <WiFi.h>
 extern "C" {
     #include "freertos/FreeRTOS.h"
@@ -24,6 +23,13 @@ extern "C" {
 #include <AsyncMqttClient.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
+#include <TelnetSpy.h>
+
+TelnetSpy SerialAndTelnet;
+#define SERIAL  SerialAndTelnet
 
 #define MQTT_UPDATE_FREQ 10000 //Updater frequency in ms
 const char eventtopic[] = "test/stat/event";
@@ -60,6 +66,7 @@ OneWire oneWire(TEMP_PROBE_PIN);
 DallasTemperature sensors(&oneWire);
 
 AsyncMqttClient mqttClient;
+AsyncWebServer server(80); //ElegantOTA
 
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
@@ -70,26 +77,27 @@ TaskHandle_t xrunHeater;
 TaskHandle_t xpressureTask;
 
 void connectToWifi() {
-    Serial.println("Connecting to Wi-Fi...");
+    SERIAL.println("Connecting to Wi-Fi...");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void connectToMqtt() {
-    Serial.println("Connecting to MQTT...");
+    SERIAL.println("Connecting to MQTT...");
     mqttClient.connect();
 }
 
 void WiFiEvent(WiFiEvent_t event) {
-    Serial.printf("[WiFi-event] event: %d\n", event);
+    SERIAL.printf("[WiFi-event] event: %d\n", event);
     switch (event) {
     case SYSTEM_EVENT_STA_GOT_IP:
-        Serial.println("WiFi connected");
-        Serial.println("IP address: ");
-        Serial.println(WiFi.localIP());
+        SERIAL.println("WiFi connected");
+        SERIAL.println("IP address: ");
+        SERIAL.println(WiFi.localIP());
         connectToMqtt();
+        server.begin(); //ElegantOTA
         break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
-        Serial.println("WiFi lost connection");
+        SERIAL.println("WiFi lost connection");
         xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
         xTimerStart(wifiReconnectTimer, 0);
         break;
@@ -99,44 +107,44 @@ void WiFiEvent(WiFiEvent_t event) {
 void pumpcontrol(char speed) {  //Pump speed setting.
     switch (speed) {
     case '0':
-        Serial.println("Pump off");
+        SERIAL.println("Pump off");
         digitalWrite(PUMP_RELAY_1, HIGH);
         digitalWrite(PUMP_RELAY_2, HIGH);
         pumpspeed = '0';
         if (mqttClient.publish(pumpsettingstatus, 2, false, "0") == 0) {
-            Serial.println("Mqtt Failed");
+            SERIAL.println("Mqtt Failed");
         }
         break;
     case '1':
-        Serial.println("Pump 1");
+        SERIAL.println("Pump 1");
         digitalWrite(PUMP_RELAY_1, HIGH);
         digitalWrite(PUMP_RELAY_2, LOW);
         pumpspeed = '1';
         if (mqttClient.publish(pumpsettingstatus, 2, false, "1") == 0) {
-            Serial.println("Mqtt Failed");
+            SERIAL.println("Mqtt Failed");
         }
         break;
     case '2':
-        Serial.println("Pump 2");
+        SERIAL.println("Pump 2");
         digitalWrite(PUMP_RELAY_1, LOW);
         digitalWrite(PUMP_RELAY_2, HIGH);
         pumpspeed = '2';
         if (mqttClient.publish(pumpsettingstatus, 2, false, "2") == 0) {
-            Serial.println("Mqtt Failed");
+            SERIAL.println("Mqtt Failed");
         }
         break;
     case '3':
-        Serial.println("Pump 3");
+        SERIAL.println("Pump 3");
         digitalWrite(PUMP_RELAY_1, LOW);
         digitalWrite(PUMP_RELAY_2, LOW);
         pumpspeed = '3';
         if (mqttClient.publish(pumpsettingstatus, 2, false, "3") == 0) {
-            Serial.println("Mqtt Failed");
+            SERIAL.println("Mqtt Failed");
         }
         break;
     default:
-        Serial.print("Unknown speed: ");
-        Serial.println(speed);
+        SERIAL.print("Unknown speed: ");
+        SERIAL.println(speed);
         break;
     }
 }
@@ -144,53 +152,53 @@ void pumpcontrol(char speed) {  //Pump speed setting.
 void onHeaterControl(String power) {  //Heater power control.
     if (power == "off"){
       heat_power = false;
-      Serial.println("Heater turned off.");
+      SERIAL.println("Heater turned off.");
       if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
-        Serial.println("Mqtt Failed");
+        SERIAL.println("Mqtt Failed");
       }
     } else if(power == "on") {
       heat_power = true;
-      Serial.println("Heater turned on.");
+      SERIAL.println("Heater turned on.");
       if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
-        Serial.println("Mqtt Failed");
+        SERIAL.println("Mqtt Failed");
       }
     } else {
-      Serial.println("Unknown heater command payload.");
+      SERIAL.println("Unknown heater command payload.");
         if (mqttClient.publish(eventtopic, 2, false, "Unknown Heater Command payload.") == 0) {
-          Serial.println("Mqtt Failed");}   
+          SERIAL.println("Mqtt Failed");}   
     }
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-    Serial.print("Publish received. Len: ");
-    Serial.println(len);
+    SERIAL.print("Publish received. Len: ");
+    SERIAL.println(len);
     if (payload) { // Check for invalid payload. 
-      Serial.print(topic);
-      Serial.print(" : ");
-      Serial.println(String(payload).substring(0,len));
+      SERIAL.print(topic);
+      SERIAL.print(" : ");
+      SERIAL.println(String(payload).substring(0,len));
       // Check topic
       if (strcmp(topic, pumpsetting) == 0) {            //Pump speed setting topic.
-        Serial.println("Got pump command.");
+        SERIAL.println("Got pump command.");
         pumpcontrol(payload[0]);
       }
       else if(strcmp(topic, heater_control) == 0) {     //Heater control topic.
-        Serial.print("Got Heater command: ");
-        Serial.println(String(payload).substring(0,len));
+        SERIAL.print("Got Heater command: ");
+        SERIAL.println(String(payload).substring(0,len));
         onHeaterControl(String(payload).substring(0,len));
       }
         else if(strcmp(topic, heater_setpoint) == 0) {  //Heater setpoint topic.
-        Serial.print("Got Heater setpoint command: ");
-        Serial.println(atoi(payload));
+        SERIAL.print("Got Heater setpoint command: ");
+        SERIAL.println(atoi(payload));
         heatsetpoint = int(atoi(payload));
         if (mqttClient.publish(setpoint_status, 2, false, payload) == 0) {
-          Serial.println("Mqtt Failed");}
+          SERIAL.println("Mqtt Failed");}
       }
       else {                                            //Catchall.
         if (mqttClient.publish(eventtopic, 2, false, "Unhandled command topic: ") == 0) {
-          Serial.println("Mqtt Failed");}        
+          SERIAL.println("Mqtt Failed");}        
       }
     } else {
-      Serial.println("Invalid Payload");
+      SERIAL.println("Invalid Payload");
     }
 }
 
@@ -226,13 +234,13 @@ void GetTempTask(void *pvParameters) {
   float temp_readings[NUM_TEMP_READ];
   float temperatureF = 0.0;
 
-  Serial.println("Init Temp");
+  SERIAL.println("Init Temp");
   if (mqttClient.publish(eventtopic, 2, false, "Init Temp") == 0) {
-    Serial.println("Mqtt Failed");}
+    SERIAL.println("Mqtt Failed");}
   do{
     noInterrupts();
     sensors.requestTemperatures();
-    Serial.println("Temp Init retry");
+    SERIAL.println("Temp Init retry");
     temperatureF = sensors.getTempFByIndex(0);
     interrupts();
     vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -245,25 +253,25 @@ void GetTempTask(void *pvParameters) {
   for (;;) {
     sensors.requestTemperaturesByIndex(0);
     temperatureF = sensors.getTempFByIndex(0);
-    // Serial.println("Blyat");
+    // SERIAL.println("Blyat");
     if (temperatureF > 0) {
       temptemp = temptemp - temp_readings[readindex];
       temp_readings[readindex] = temperatureF;
       temptemp = temptemp + temp_readings[readindex];
       readindex = readindex + 1;
-      // Serial.print("Temp: ");
-      // Serial.println(temperatureF);
+      // SERIAL.print("Temp: ");
+      // SERIAL.println(temperatureF);
 
       if (readindex >= NUM_TEMP_READ) {
         readindex = 0;
       }
       temp = temptemp / (NUM_TEMP_READ + 1);
     } else {
-      Serial.print("TempFail");
-      Serial.println(temperatureF);
+      SERIAL.print("TempFail");
+      SERIAL.println(temperatureF);
       sensors.requestTemperaturesByIndex(0);
       if (mqttClient.publish(eventtopic, 2, false, "TempFail") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     }
     vTaskDelay(TEMP_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
@@ -271,28 +279,28 @@ void GetTempTask(void *pvParameters) {
 
 void runHeater(void *pvParameters) {
   for (;;) {
-    // if ( heat_power){Serial.println("heat turned on");}
-    // if ( heating ){Serial.println("heat currently running");}
-    // Serial.print(heatsetpoint);
-    // Serial.print(" / ");
-    // Serial.println(int(temp-1));
+    // if ( heat_power){SERIAL.println("heat turned on");}
+    // if ( heating ){SERIAL.println("heat currently running");}
+    // SERIAL.print(heatsetpoint);
+    // SERIAL.print(" / ");
+    // SERIAL.println(int(temp-1));
     if ( heat_power && !heating && (int(heatsetpoint) > (int(temp-1))) ){ // && (pressure > 7) ){
       digitalWrite(HEATER_RELAY, LOW);
       heating = true;
       if (mqttClient.publish(heater_stat, 2, false, "On") == 0) {
-          Serial.println("Mqtt Failed");}
+          SERIAL.println("Mqtt Failed");}
     }
     if ((heat_power && heating && (int(heatsetpoint) < (int(temp)))) ){ //|| (pressure < 8) ){
       digitalWrite(HEATER_RELAY, HIGH);
       heating = false;
       if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     }
     if (!heat_power){
       digitalWrite(HEATER_RELAY, HIGH);
       heating = false;
       if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     }
   vTaskDelay(HEAT_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
@@ -300,75 +308,75 @@ void runHeater(void *pvParameters) {
 
 void UpdateStatus(void *pvParameters) {
   for (;;) {
-    Serial.println("      Status");
-    Serial.println("-------------------");
-    Serial.print("Pump setting: ");
-    Serial.println(pumpspeed);
+    SERIAL.println("      Status");
+    SERIAL.println("-------------------");
+    SERIAL.print("Pump setting: ");
+    SERIAL.println(pumpspeed);
     if (mqttClient.publish(pumpsettingstatus, 2, false, String(pumpspeed).c_str()) == 0) {
-      Serial.println("Mqtt Failed");
+      SERIAL.println("Mqtt Failed");
     }
 
-    Serial.print("Heater setting: ");
+    SERIAL.print("Heater setting: ");
     if (heat_power) {
-      Serial.println("on.");
+      SERIAL.println("on.");
       if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     } else {
-      Serial.println("off.");
+      SERIAL.println("off.");
       if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     }
 
-    Serial.print("Heater run status: ");
+    SERIAL.print("Heater run status: ");
     if (heating) {
-      Serial.println("on.");
+      SERIAL.println("on.");
       if (mqttClient.publish(heater_run_status, 2, false, "On") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     } else {
-      Serial.println("off.");
+      SERIAL.println("off.");
       if (mqttClient.publish(heater_run_status, 2, false, "Off") == 0) {
-        Serial.println("Mqtt Failed");}
+        SERIAL.println("Mqtt Failed");}
     }
     
-    Serial.print("Temperature: ");
+    SERIAL.print("Temperature: ");
     char charVal[10];
     dtostrf(temp, 4, 2, charVal);
-    Serial.println(charVal);
+    SERIAL.println(charVal);
     if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
-      Serial.println("Mqtt Failed");}
+      SERIAL.println("Mqtt Failed");}
 
-    Serial.print("Pressure: ");
+    SERIAL.print("Pressure: ");
     char pressval[10];
     dtostrf(pressure, 2, 0, pressval);
-    Serial.println(pressval);
+    SERIAL.println(pressval);
     if (mqttClient.publish(pressuretopic, 2, false, pressval) == 0) {
-      Serial.println("Mqtt Failed");}
+      SERIAL.println("Mqtt Failed");}
     
     if (mqttClient.publish(eventtopic, 2, false, "Alive") == 0) {
-      Serial.println("Mqtt Failed");}
+      SERIAL.println("Mqtt Failed");}
     vTaskDelay(MQTT_UPDATE_FREQ / portTICK_PERIOD_MS);
   }
 }
 
 void onMqttConnect(bool sessionPresent) {
-    Serial.println("Connected to MQTT.");
-    Serial.print("Session present: ");
-    Serial.println(sessionPresent);
+    SERIAL.println("Connected to MQTT.");
+    SERIAL.print("Session present: ");
+    SERIAL.println(sessionPresent);
 
     uint16_t pumpsettingPub = mqttClient.subscribe(pumpsetting, 0);
-    Serial.print("Subscribed to pump topic: ");
-    Serial.println(pumpsettingPub);
+    SERIAL.print("Subscribed to pump topic: ");
+    SERIAL.println(pumpsettingPub);
 
     uint16_t heateronPub = mqttClient.subscribe(heater_control, 0);
-    Serial.print("Subscribed to heat control topic: ");
-    Serial.println(heateronPub);
+    SERIAL.print("Subscribed to heat control topic: ");
+    SERIAL.println(heateronPub);
 
     uint16_t heatersetpointPub = mqttClient.subscribe(heater_setpoint, 0);
-    Serial.print("Subscribed to heat setpoint topic: ");
-    Serial.println(heatersetpointPub);
+    SERIAL.print("Subscribed to heat setpoint topic: ");
+    SERIAL.println(heatersetpointPub);
 
     if (mqttClient.publish(eventtopic, 2, false, "Connected to MQTT") == 0) {
-      Serial.println("Mqtt Failed");}
+      SERIAL.println("Mqtt Failed");}
 
     xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, &xUpdateStatus);
     xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, &xGetTempTask);
@@ -377,7 +385,7 @@ void onMqttConnect(bool sessionPresent) {
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-    Serial.println("Disconnected from MQTT.");
+    SERIAL.println("Disconnected from MQTT.");
 
     if (WiFi.isConnected()) {
         xTimerStart(mqttReconnectTimer, 0);
@@ -390,9 +398,11 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
 }
 
 void setup() {
-    Serial.begin(115200);
-    Serial.println();
-    Serial.println();
+    SERIAL.begin(74880);
+    delay(100);
+    // SERIAL.begin(115200);
+    // SERIAL.println();
+    // SERIAL.println();
 
     sensors.begin(); //Onewire temp sensor bus
     vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -423,10 +433,46 @@ void setup() {
 
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) { //ElegantOTA
+      request->send(200, "text/plain", "Hi! I am ESP32.");
+    });
+    AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+
     connectToWifi();
 
     vTaskStartScheduler();
 }
 
 void loop() {
+  AsyncElegantOTA.loop(); //ElegantOTA
+  SerialAndTelnet.handle();
+
+  if (SERIAL.available() > 0) {
+    char c = SERIAL.read();
+    switch (c) {
+      case '\r':
+        SERIAL.println();
+        break;
+      // case 'C':
+      //   SERIAL.print("\nConnecting ");
+      //   WiFi.begin(ssid, password);
+      //   waitForConnection();
+      //   break;
+      // case 'D':
+      //   SERIAL.print("\nDisconnecting ...");
+      //   WiFi.disconnect();
+      //   waitForDisconnection();
+      //   break;
+      // case 'R':
+      //   SERIAL.print("\nReconnecting ");
+      //   WiFi.reconnect();
+      //   waitForDisconnection();
+      //   waitForConnection();
+      //   break;
+      default:
+        SERIAL.print(c);
+        break;
+    }
+  }
+  //vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
