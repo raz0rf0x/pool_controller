@@ -170,12 +170,15 @@ void onHeaterControl(String power) {  //Heater power control.
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+    std::string payloadtrimmed1{payload, len};
+    const char* payloadtrimmed = payloadtrimmed1.c_str();
     SERIAL.print("Publish received. Len: ");
     SERIAL.println(len);
     if (payload) { // Check for invalid payload. 
       SERIAL.print(topic);
       SERIAL.print(" : ");
       SERIAL.println(String(payload).substring(0,len));
+      SERIAL.println(payloadtrimmed);
       // Check topic
       if (strcmp(topic, pumpsetting) == 0) {            //Pump speed setting topic.
         SERIAL.println("Got pump command.");
@@ -189,6 +192,7 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         else if(strcmp(topic, heater_setpoint) == 0) {  //Heater setpoint topic.
         SERIAL.print("Got Heater setpoint command: ");
         SERIAL.println(atoi(payload));
+        // SERIAL.println(payloadtrimmed);
         heatsetpoint = int(atoi(payload));
         if (mqttClient.publish(setpoint_status, 2, false, payload) == 0) {
           SERIAL.println("Mqtt Failed");}
@@ -327,6 +331,13 @@ void UpdateStatus(void *pvParameters) {
         SERIAL.println("Mqtt Failed");}
     }
 
+    SERIAL.print("Heater setpoint: ");
+    SERIAL.println(heatsetpoint);
+    char setVal[10];
+    dtostrf(heatsetpoint, 4, 0, setVal);
+      if (mqttClient.publish(setpoint_status, 2, false, setVal) == 0) {
+          SERIAL.println("Mqtt Failed");}
+
     SERIAL.print("Heater run status: ");
     if (heating) {
       SERIAL.println("on.");
@@ -344,6 +355,13 @@ void UpdateStatus(void *pvParameters) {
     SERIAL.println(charVal);
     if (mqttClient.publish(temptopic, 2, false, charVal) == 0) {
       SERIAL.println("Mqtt Failed");}
+
+    // SERIAL.print("Heat Setpoint: ");
+    // char heatVal[10];
+    // dtostrf(heatsetpoint, 4, 2, heatVal);
+    // SERIAL.println(heatVal);
+    // if (mqttClient.publish(setpoint_status, 2, false, heatVal) == 0) {
+    //   SERIAL.println("Mqtt Failed");}
 
     SERIAL.print("Pressure: ");
     char pressval[10];
@@ -378,7 +396,7 @@ void onMqttConnect(bool sessionPresent) {
     if (mqttClient.publish(eventtopic, 2, false, "Connected to MQTT") == 0) {
       SERIAL.println("Mqtt Failed");}
 
-    xTaskCreate(UpdateStatus, "UpdaterTask", 2000, NULL, 1, &xUpdateStatus);
+    xTaskCreate(UpdateStatus, "UpdaterTask", 4000, NULL, 1, &xUpdateStatus);
     xTaskCreate(GetTempTask, "TempTask", 20000, NULL, 1, &xGetTempTask);
     xTaskCreate(runHeater, "HeaterTask", 20000, NULL, 1, &xrunHeater);
     xTaskCreate(PressureTask, "PressureReadTask", 5000, NULL, 1, &xpressureTask);
