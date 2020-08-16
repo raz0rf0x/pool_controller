@@ -30,18 +30,18 @@ TelnetSpy SerialAndTelnet;
 #define SERIAL  SerialAndTelnet
 
 #define MQTT_UPDATE_FREQ 10000 //Updater frequency in ms
-const char eventtopic[] = "test/stat/event";
+const char eventtopic[] = "pool/stat/event";
 
 #define PUMP_RELAY_1 26     //Pump Relays
 #define PUMP_RELAY_2 27
-const char pumpsetting[] = "test/control/pump";
-const char pumpsettingstatus[] = "test/stat/pump";
+const char pumpsetting[] = "pool/control/pump";
+const char pumpsettingstatus[] = "pool/stat/pump";
 char pumpspeed = '0';       //Init pumpspeed global
 
 #define NUM_TEMP_READ 10
 #define TEMP_UPDATE_FREQ 5000  //Temp update freqency in ms
 #define TEMP_PROBE_PIN 32      //Temp probe pin
-const char temptopic[] = "test/stat/temp";
+const char temptopic[] = "pool/stat/temp";
 float temp = 0.0;
 
 #define HEATER_RELAY 25 //Heater Relay
@@ -49,15 +49,15 @@ float temp = 0.0;
 bool heat_power = false;    //Init heatercommand global
 int heatsetpoint = 0;       //Init heatsetpoint global
 bool heating = false;       //Init heater status global
-const char setpoint_status[] = "test/stat/setpoint";
-const char heater_stat[] = "test/stat/heater";
-const char heater_setpoint[] = "test/control/setpoint";
-const char heater_control[] = "test/control/heater";
-const char heater_run_status[] = "test/stat/heating";
+const char setpoint_status[] = "pool/stat/setpoint";
+const char heater_stat[] = "pool/stat/heater";
+const char heater_setpoint[] = "pool/control/setpoint";
+const char heater_control[] = "pool/control/heater";
+const char heater_run_status[] = "pool/stat/heating";
 
 #define PRESSURE_PIN 35 //Pressure sensor pin
 #define PRESSURE_UPDATE_FREQ 1000 //Heater check freqency in ms
-const char pressuretopic[] = "test/stat/pressure";
+const char pressuretopic[] = "pool/stat/pressure";
 int pressure = 0;
 
 OneWire oneWire(TEMP_PROBE_PIN);
@@ -154,10 +154,10 @@ void onHeaterControl(String power) {  //Heater power control.
       if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
         SERIAL.println("Mqtt Failed");
       }
-    } else if(power == "on") {
+    } else if(power == "heat") {
       heat_power = true;
       SERIAL.println("Heater turned on.");
-      if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "heat") == 0) {
         SERIAL.println("Mqtt Failed");
       }
     } else {
@@ -281,19 +281,19 @@ void runHeater(void *pvParameters) {
     if ( heat_power && !heating && (int(heatsetpoint) > (int(temp-1))) ){ // && (pressure > 7) ){
       digitalWrite(HEATER_RELAY, LOW);
       heating = true;
-      if (mqttClient.publish(heater_stat, 2, false, "On") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "heating") == 0) {
           SERIAL.println("Mqtt Failed");}
     }
     if ((heat_power && heating && (int(heatsetpoint) < (int(temp)))) ){ //|| (pressure < 8) ){
       digitalWrite(HEATER_RELAY, HIGH);
       heating = false;
-      if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
         SERIAL.println("Mqtt Failed");}
     }
     if (!heat_power){
       digitalWrite(HEATER_RELAY, HIGH);
       heating = false;
-      if (mqttClient.publish(heater_stat, 2, false, "Off") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
         SERIAL.println("Mqtt Failed");}
     }
   vTaskDelay(HEAT_UPDATE_FREQ / portTICK_PERIOD_MS);
@@ -313,7 +313,7 @@ void UpdateStatus(void *pvParameters) {
     SERIAL.print("Heater setting: ");
     if (heat_power) {
       SERIAL.println("on.");
-      if (mqttClient.publish(heater_stat, 2, false, "on") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "heat") == 0) {
         SERIAL.println("Mqtt Failed");}
     } else {
       SERIAL.println("off.");
@@ -331,11 +331,11 @@ void UpdateStatus(void *pvParameters) {
     SERIAL.print("Heater run status: ");
     if (heating) {
       SERIAL.println("on.");
-      if (mqttClient.publish(heater_run_status, 2, false, "On") == 0) {
+      if (mqttClient.publish(heater_run_status, 2, false, "heating") == 0) {
         SERIAL.println("Mqtt Failed");}
     } else {
       SERIAL.println("off.");
-      if (mqttClient.publish(heater_run_status, 2, false, "Off") == 0) {
+      if (mqttClient.publish(heater_run_status, 2, false, "off") == 0) {
         SERIAL.println("Mqtt Failed");}
     }
     
