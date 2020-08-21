@@ -168,11 +168,11 @@ void onHeaterControl(String power) {  //Heater power control.
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-    std::string payloadtrimmed1{payload, len};
-    const char* payloadtrimmed = payloadtrimmed1.c_str();
     SERIAL.print("Publish received. Len: ");
     SERIAL.println(len);
     if (payload) { // Check for invalid payload. 
+      std::string payloadtrimmed1{payload, len};
+      const char* payloadtrimmed = payloadtrimmed1.c_str();
       SERIAL.print(topic);
       SERIAL.print(" : ");
       SERIAL.println(String(payload).substring(0,len));
@@ -190,7 +190,6 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         else if(strcmp(topic, heater_setpoint) == 0) {  //Heater setpoint topic.
         SERIAL.print("Got Heater setpoint command: ");
         SERIAL.println(atoi(payload));
-        // SERIAL.println(payloadtrimmed);
         heatsetpoint = int(atoi(payload));
         if (mqttClient.publish(setpoint_status, 2, false, payload) == 0) {
           SERIAL.println("Mqtt Failed");}
@@ -205,6 +204,10 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 }
 
 void PressureTask(void *pvParameters) {
+  // 279 = 19
+  // 217 = 14
+  // 113 = 7
+  // 33 = 1
   int readindex = 0;
   int pressure_sum = 0;
   int readings[10];
@@ -222,7 +225,11 @@ void PressureTask(void *pvParameters) {
     if (readindex >= 10) {
       readindex = 0;
     }
-    pressure = map((pressure_sum / 10), 31, 479, 0, 30);
+    // SERIAL.print("Pressure ADC reading: ");
+    // SERIAL.println(pval);
+    //SERIAL.println((pressure_sum / 10));
+    //pressure = map((pressure_sum / 10), 31, 479, 0, 30);
+    pressure = (0.07317 * (pressure_sum/10)) - 1.4146;
     if (pressure < 0) {
       pressure = 0;
     }
@@ -278,13 +285,13 @@ void GetTempTask(void *pvParameters) {
 
 void runHeater(void *pvParameters) {
   for (;;) {
-    if ( heat_power && !heating && (int(heatsetpoint) > (int(temp-1))) ){ // && (pressure > 7) ){
+    if ( heat_power && !heating && (int(heatsetpoint) > int(temp)) ){ // && (pressure > 7) ){
       digitalWrite(HEATER_RELAY, LOW);
       heating = true;
       if (mqttClient.publish(heater_stat, 2, false, "heating") == 0) {
           SERIAL.println("Mqtt Failed");}
     }
-    if ((heat_power && heating && (int(heatsetpoint) < (int(temp)))) ){ //|| (pressure < 8) ){
+    if (heat_power && heating && (int(heatsetpoint) < int(temp)) ){ //|| (pressure < 8) ){
       digitalWrite(HEATER_RELAY, HIGH);
       heating = false;
       if (mqttClient.publish(heater_stat, 2, false, "off") == 0) {
