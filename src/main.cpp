@@ -288,7 +288,7 @@ void runHeater(void *pvParameters) {
     if ( heat_power && !heating && (int(heatsetpoint) > int(temp)) ){ // && (pressure > 7) ){
       digitalWrite(HEATER_RELAY, LOW);
       heating = true;
-      if (mqttClient.publish(heater_stat, 2, false, "heating") == 0) {
+      if (mqttClient.publish(heater_stat, 2, false, "heat") == 0) {
           SERIAL.println("Mqtt Failed");}
     }
     if (heat_power && heating && (int(heatsetpoint) < int(temp)) ){ //|| (pressure < 8) ){
@@ -338,7 +338,7 @@ void UpdateStatus(void *pvParameters) {
     SERIAL.print("Heater run status: ");
     if (heating) {
       SERIAL.println("on.");
-      if (mqttClient.publish(heater_run_status, 2, false, "heating") == 0) {
+      if (mqttClient.publish(heater_run_status, 2, false, "heat") == 0) {
         SERIAL.println("Mqtt Failed");}
     } else {
       SERIAL.println("off.");
